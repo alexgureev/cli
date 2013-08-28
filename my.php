@@ -28,6 +28,7 @@ class My {
     protected $dataSkip = 0;
     protected $currentFixedData;
     protected $tableFieldType = array();
+    protected $tableFixValue = array();
     protected $allowNull;
     protected $default;
     protected $autoIncrement;
@@ -98,6 +99,7 @@ class My {
         $this->pg->connect2();
 
         if (isset($this->options['data_only']) or isset($this->options['full_dump'])) {
+            $this->loadTableFixValue();
             $this->transferPrepare();
         } 
         
@@ -113,6 +115,17 @@ class My {
             $arr = explode(':', $item);
             if(sizeof($arr)>1) {
                 $this->tableFieldType[$arr[0]][$arr[1]] = $arr[2];
+            }
+        }
+    }
+    
+    protected function loadTableFixValue() {
+        $content = @file_get_contents(__DIR__ . '/data/tableFixValue.txt');
+        $array = explode("\n", $content);
+        foreach ($array as $item) {
+            $arr = explode(':', $item);
+            if(sizeof($arr)>1) {
+                $this->tableFixValue[$arr[0]][$arr[1]] = $arr[2];
             }
         }
     }
@@ -531,7 +544,7 @@ $yellow = $sth->fetchAll();
 
                     $this->currentData = array();
                     for($i = 0; $i<=$colCount-1; $i++) {
-                        $val = $this->fixValues($row[$i]);
+                        $val = $this->fixValues($row[$i], $i);
                         
                         $this->currentData[$i] = $row[$i];
                         $this->currentFixedData[$i] = $val;
@@ -602,7 +615,15 @@ $yellow = $sth->fetchAll();
         $this->pgPrepared = 1;
     }
     
-    protected function fixValues($val) {
+    protected function fixValues($val, $i) {
+        if(isset($this->tableFixValue[$this->currentTable][$i]) ) {
+            try {
+                exec($this->tableFixValue[$this->currentTable][$i]);
+            } catch (Exception $e) {
+                // TODO exec issue
+            }
+        }
+        
         if($val == '0000-00-00 00:00:00' || $val == '0000-00-00') {
            return NULL;
         }
