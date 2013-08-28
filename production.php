@@ -33,6 +33,9 @@ $longopts  = array(
     "scheme_wipe::",
     "data_only::",
     "data_wipe::",
+    "data_skip::",
+    "select_table::",
+    "soft::",
     "log_level::"
 );
 $options = getopt($shortopts, $longopts);

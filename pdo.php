@@ -15,7 +15,11 @@ class PdoDrive {
     function connect() {
         try {
             $this->link = new PDO($this->cred['drive'].':host='.$this->cred['host'].';port='.$this->cred['port'].';dbname='.$this->cred['db'], 
-                $this->cred['user'], $this->cred['pass'], array( PDO::ATTR_PERSISTENT => true));
+                $this->cred['user'], $this->cred['pass'], array( 
+                    PDO::ATTR_PERSISTENT => true, 
+                    PDO::ATTR_EMULATE_PREPARES => false, 
+                    PDO::ATTR_STRINGIFY_FETCHES => false
+            ));
             return $this;
         } catch (PDOException $e) {
             print Timer::diff()."Error!: " . $e->getMessage() . "\n";
@@ -41,8 +45,8 @@ class PdoDrive {
 
     public function exec($sql) {
 //        $this->stmt = $this->link->exec($sql);
-        echo $sql;
-        return $this->link->exec($sql);
+//        echo $sql;
+        return $this->link->query($sql);
 //        if(is_object($this->stmt)) {
 //            return $this->fetchAssoc();
 //        } else return false;
@@ -52,6 +56,10 @@ class PdoDrive {
 //        for ($set = array (); $rs = $this->stmt->fetch(PDO::FETCH_ASSOC); $set[] = $rs);
 //        for ($set = array (); $rs = $this->stmt->fetch(PDO::FETCH_ASSOC); $set[] = $rs);
         return $this->stmt->fetchAll();
+    }
+    
+    public function fetch() {
+        return $this->stmt->fetch(PDO::FETCH_NUM);
     }
     
     public function bindColumn($id, $val) {
@@ -68,8 +76,8 @@ class PdoDrive {
         return $this;
     }
     
-    public function bindValue($id, $val) {
-        $this->stmt->bindValue($id, $val);
+    public function bindValue($id, $val, $type = PDO::PARAM_STR) {
+        $this->stmt->bindValue($id, $val, $type);
         return $this;
     }
 }
