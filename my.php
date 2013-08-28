@@ -27,6 +27,7 @@ class My {
     protected $currentData;
     protected $dataSkip = 0;
     protected $currentFixedData;
+    protected $tableFieldType = array();
     protected $allowNull;
     protected $default;
     protected $autoIncrement;
@@ -36,6 +37,8 @@ class My {
     protected $currentPage = 0;
     protected $pages = 0;
     protected $page = 1;
+    protected $totalReadTime = 0;
+    protected $totalWriteTime = 0;
     
     protected $sql;
     protected $sqlArray = array();
@@ -78,30 +81,65 @@ class My {
     public function run() {
         $this->getTablesList();
         
-        if (isset($this->options['scheme_only']) or isset($this->options['full_dump'])) {
+        if (isset($this->options['scheme_only']) or isset($this->options['index_only']) or isset($this->options['full_dump'])) {
             
             if(isset($this->options['database_nuke'])) {
                 $this->databaseNuke();
             }
             
+            $this->loadTableFieldsType();
             $this->pg->connect2();
 
             $this->generateTypes();
-            $this->createSchema();
+            if(!isset($this->options['index_only'])) {
+                $this->createSchema();
+            }
         } 
         $this->pg->connect2();
 
         if (isset($this->options['data_only']) or isset($this->options['full_dump'])) {
             $this->transferPrepare();
         } 
+        
+        if (isset($this->options['index_only']) or isset($this->options['full_dump'])) {
+            $this->createIndexes();
+        }
+    }
+    
+    protected function loadTableFieldsType() {
+        $content = @file_get_contents(__DIR__ . '/data/tableFieldType.txt');
+        $array = explode("\n", $content);
+        foreach ($array as $item) {
+            $arr = explode(':', $item);
+            if(sizeof($arr)>1) {
+                $this->tableFieldType[$arr[0]][$arr[1]] = $arr[2];
+            }
+        }
+    }
+    
+    protected function createIndexes() {
+        foreach ($this->indexSql as $sql) {
+            Timer::reset();
+            $result = $this->pg->db()->exec($sql);
+            if($result !== false) {
+                echo Timer::diff() . Timer::interval() . $this->col->getColoredString("Sql executed\n", "brown");
+            } else {
+                echo Timer::diff() . Timer::interval() . $this->col->getColoredString("Sql failed", "red");
+                print_r($this->pg->db()->getError());
+            }
+        }
     }
 
     protected function getTablesList() {
-        $this->db->prepare('SHOW TABLES;')->execute();
-        $res = $this->db->fetchAssoc();
-        file_put_contents(__DIR__ . "/data/tables.txt", "");
-        file_put_contents(__DIR__ . "/data/tablesSql.txt", "");
-
+        if(isset($this->options['select_table'])) {
+            $res = $this->getSelectedTables();
+        } else {
+            $this->db->prepare('SHOW TABLES;')->execute();
+            $res = $this->db->fetchAssoc();
+            file_put_contents(__DIR__ . "/data/tables.txt", "");
+            file_put_contents(__DIR__ . "/data/tablesSql.txt", "");
+        }
+        
         foreach ($res as $table) {
 
             $this->currentTable = $table['Tables_in_' . $this->cred['db']];
@@ -120,6 +158,17 @@ class My {
                 file_put_contents(__DIR__ . "/data/tablesSql.txt", $this->sql, FILE_APPEND);
             }
         }
+    }
+    
+    protected function getSelectedTables() {
+        $array = explode(' ', $this->options['select_table']);
+        $result = array();
+        
+        foreach ($array as $table) {
+            $result[] = array('Tables_in_' . $this->cred['db'] => $table);
+        }
+        
+        return $result;
     }
 
     protected function getTableFields() {
@@ -153,7 +202,9 @@ class My {
             
             $this->sql .= '"'.$field['Field'].'" ';
             
-            if($field['Type'] != $this->currentNewType) {
+            if(isset($this->tableFieldType[$this->currentTable][$field['Field']])) {
+                $this->sql .= $this->tableFieldType[$this->currentTable][$field['Field']];
+            } elseif($field['Type'] != $this->currentNewType) {
                 $this->sql .= $this->currentNewType . $this->allowNull . $this->default ;
             } else {
                 $this->sql .= $this->currentType . $this->allowNull . $this->default;
@@ -264,7 +315,7 @@ class My {
             if(strlen($default) == 0) {
                 return '';
             } else {
-                // TODO string must be in quotes
+                // TODO convert bits to int
                 if( $default == "b'1'")
                     return ' DEFAULT '.$default;
                 else 
@@ -278,7 +329,11 @@ class My {
     }
     
     protected function createTextType($string) {
-        return str_replace(array('longtext', 'tinytext', 'mediumtext'), 'text', $string);
+        if($string == 'tinytext') {
+            return 'varchar(255)';
+        } else {
+            return str_replace(array('longtext', 'tinytext', 'mediumtext'), 'text', $string);
+        }
     }
     
     protected function createSmallIntType() {
@@ -296,7 +351,7 @@ class My {
     }
     
     protected function createIntegerType() {
-        return 'bigint'; // TODO ip issue
+        return 'integer';
     }
     
     protected function createBinaryType() {
@@ -405,6 +460,8 @@ class My {
         foreach ($this->sqlArray as $table => $sql) {
             $this->page = 1;
             $this->pgPrepared = 0;
+            $this->totalReadTime = $this->totalWriteTime = 0;
+    
             $this->currentTable = $table;
             if(isset($this->options['data_wipe'])) {
                 echo Timer::diff() . $this->col->getColoredString('TRUNCATE TABLE '.$table . "\n", "red");
@@ -441,7 +498,7 @@ $yellow = $sth->fetchAll();
                  */
                 $this->db->prepare("SELECT * FROM `{$this->currentTable}` LIMIT ?, ?");
                 
-                echo Timer::diff() . $this->col->getColoredString("$table", "yellow") . $this->col->getColoredString(" Records: {$this->totalRows}". "\n\n", "cyan");
+                echo Timer::diff() . $this->col->getColoredString("$table\n", "yellow");
                 $this->dataTransfer();
             } elseif ($result===false)
                 echo Timer::diff() . $this->col->getColoredString("Skip table, records counter return false.". "\n", "light_blue");
@@ -451,6 +508,8 @@ $yellow = $sth->fetchAll();
     protected function dataTransfer() {
         while(  $this->page<=$this->pages &&
                 ( $this->dataSkip > $this->page * $this->rowsPerTime || $this->dataSkip == 0)) {
+            Timer::reset();
+            
             $percentage = round( $this->page / $this->pages * 100, 2 );
             $start = $this->rowsPerTime * ($this->page - 1);
 
@@ -459,7 +518,8 @@ $yellow = $sth->fetchAll();
 
             $var = $this->db->execute();
             if($var == true) {
-                echo Timer::diff() . $this->col->getColoredString("\033[1F" . $this->col->getColoredString("\t\tPages: ", "magenta") . $this->page . "/" .$this->col->getColoredString($this->pages, "green") . "\t\t\t" . $percentage . "%\n", "yellow");
+                $reedTime = Timer::interval();
+                $this->totalReadTime += $reedTime;
                 $colCount = $this->db->stmt->columnCount();
                 
                 if($this->pgPrepared == 0) {
@@ -467,6 +527,8 @@ $yellow = $sth->fetchAll();
                 }
 
                 while($row = $this->db->stmt->fetch()) {
+                    Timer::reset();
+
                     $this->currentData = array();
                     for($i = 0; $i<=$colCount-1; $i++) {
                         $val = $this->fixValues($row[$i]);
@@ -484,7 +546,9 @@ $yellow = $sth->fetchAll();
                     }
 
                     $res = $this->pg->db()->execute();
-
+                    $writeTime = Timer::interval();
+                    $this->totalWriteTime += $writeTime;
+                    
                     if($res == false ) {
                         echo Timer::diff() . "\t ERROR IN POSTGRESQL rows($colCount)\n";
                         print_r($this->currentData);var_dump($this->currentData);
@@ -493,6 +557,16 @@ $yellow = $sth->fetchAll();
                         exit;
                     }
                 }
+                
+                echo $this->col->getColoredString( "\033[1F" . Timer::diff(), "light_green" ) . 
+                     $this->col->getColoredString( "Records: ", "cyan") . 
+                     $this->col->getColoredString( ($this->page * $this->rowsPerTime ) . "/", "magenta") .
+                     $this->col->getColoredString( $this->totalRows . " ", "green" ) . 
+                     $this->col->getColoredString( $percentage . "% ", "yellow" ) .
+                     $this->col->getColoredString( $this->rowsPerTime . "pt ", "green" ) .
+                     $this->col->getColoredString( $reedTime . "\t", "magenta" ) . 
+                     $this->col->getColoredString( $writeTime, "purple" ); 
+                     
             } else {
                 echo Timer::diff() . "\t ERROR IN MYSQL\n";
                 echo Timer::diff() . $this->col->getColoredString(print_r($this->db->getError(), 1). "\n", "red");
@@ -502,11 +576,16 @@ $yellow = $sth->fetchAll();
             $this->page++;
         }
         
+        echo "\n";
+        
         if($this->page>$this->pages) {
-            echo Timer::diff() . $this->col->getColoredString("All data transfered\n", "light_gray");
-        }elseif($this->page!=$this->pages) {
-            echo Timer::diff() . $this->col->getColoredString("Skipped by 'data_skip'\n", "light_purple");
+            echo Timer::diff() . $this->col->getColoredString("All data transfered\t", "light_gray");
+        } elseif ($this->page!=$this->pages) {
+            echo Timer::diff() . $this->col->getColoredString("Skipped by 'data_skip'\t", "light_purple");
         }
+        
+        echo $this->col->getColoredString( "R:".$this->totalReadTime . "\t", "magenta" ) . 
+             $this->col->getColoredString( "W:".$this->totalWriteTime . "\n", "purple" );
     }
     
     protected function pgPrepare($cols) {
@@ -527,7 +606,7 @@ $yellow = $sth->fetchAll();
         if($val == '0000-00-00 00:00:00' || $val == '0000-00-00') {
            return NULL;
         }
-        
+        // base_convert($row['my_bit'],16,10)
         return $val;
     }
 }

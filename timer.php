@@ -5,6 +5,7 @@ class Timer {
     public static $end;
     public static $col;
     protected static $options;
+    protected static $interval;
 
     public static function init($options) {
         self::$start = self::utime();
@@ -16,7 +17,7 @@ class Timer {
     }
     
     public static function reset() {
-        self::$start = self::utime();
+        self::$interval = self::utime();
     }
     
 //    public static function millitime() {
@@ -34,7 +35,18 @@ class Timer {
         $micro = $diff - $sec;
         $final = strftime('%T', mktime(0, 0, $sec)) . str_replace('0.', '.', sprintf('%.3f', $micro));
 
-        echo self::$col->getColoredString($final, "light_green")."\t";
+        return $final."\t";
+    }
+    
+    public static function interval() {
+        $start = self::$interval;
+        $end =  self::utime();
+        $diff = $end-$start;
+        $sec = intval($diff);
+        $micro = $diff - $sec;
+        $final = strftime('%S', mktime(0, 0, $sec)) . str_replace('0.', '.', sprintf('%.3f', $micro));
+
+        return $final;
     }
     
     public static function utime() {

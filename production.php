@@ -34,6 +34,7 @@ $longopts  = array(
     "data_only::",
     "data_wipe::",
     "data_skip::",
+    "index_only::",
     "select_table::",
     "soft::",
     "log_level::"

@@ -46,7 +46,7 @@ class PdoDrive {
     public function exec($sql) {
 //        $this->stmt = $this->link->exec($sql);
 //        echo $sql;
-        return $this->link->query($sql);
+        return $this->link->exec($sql);
 //        if(is_object($this->stmt)) {
 //            return $this->fetchAssoc();
 //        } else return false;
