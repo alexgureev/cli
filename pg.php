@@ -13,7 +13,14 @@ class Pg {
             
     protected $db;
     
-    function __construct() {
+    function __construct($options) {
+        if(isset($options['static_config'])) {
+            $static = json_decode(file_get_contents(__DIR__ . "/data/staticConfig{$options['static_config']}.txt"), 1);
+            foreach ($static['pg'] as $key => $val) {
+                $this->cred[$key] = $val;
+            }
+        }
+
         $this->db = new PdoDrive($this->cred);
         return $this;
     }

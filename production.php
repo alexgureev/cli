@@ -36,6 +36,7 @@ $longopts  = array(
     "data_skip::",
     "index_only::",
     "select_table::",
+    "static_config::",
     "soft::",
     "log_level::"
 );

@@ -40,6 +40,8 @@ class My {
     protected $page = 1;
     protected $totalReadTime = 0;
     protected $totalWriteTime = 0;
+    protected $debug;
+    protected $selectedData = array();
     
     protected $sql;
     protected $sqlArray = array();
@@ -51,7 +53,7 @@ class My {
 
     function __construct($options) {
         $this->db = new PdoDrive($this->cred);
-        $this->pg = new Pg($this->cred);
+        $this->pg = new Pg($options);
         $this->col = new Colors();
         $this->options = $options;
         if(isset($options['default'])) {
@@ -80,6 +82,7 @@ class My {
     }
 
     public function run() {
+        $this->loadTableFieldsType();
         $this->getTablesList();
         
         if (isset($this->options['scheme_only']) or isset($this->options['index_only']) or isset($this->options['full_dump'])) {
@@ -99,6 +102,7 @@ class My {
         $this->pg->connect2();
 
         if (isset($this->options['data_only']) or isset($this->options['full_dump'])) {
+            $this->loadSelectedData();
             $this->loadTableFixValue();
             $this->transferPrepare();
         } 
@@ -126,6 +130,17 @@ class My {
             $arr = explode(':', $item);
             if(sizeof($arr)>1) {
                 $this->tableFixValue[$arr[0]][$arr[1]] = $arr[2];
+            }
+        }
+    }
+    
+    protected function loadSelectedData() {
+        $content = @file_get_contents(__DIR__ . '/data/selectedData.txt');
+        $array = explode("\n", $content);
+        foreach ($array as $item) {
+            $arr = explode('@#:', $item);
+            if(sizeof($arr)>1) {
+                $this->selectedData[$arr[0]] = json_decode($arr[1], 1);
             }
         }
     }
@@ -222,7 +237,6 @@ class My {
             } else {
                 $this->sql .= $this->currentType . $this->allowNull . $this->default;
             }
-
             if($row<$size) {
                 $this->sql .= ",\n";
             } else {
@@ -357,7 +371,7 @@ class My {
         if(strpos($this->currentField, 'gold') !== false) {
             return 'decimal(20,5)';
         } elseif(strpos($string, 'decimal') === false ) {
-            return 'money';
+            return 'decimal(16,2)';
         } else {
             return str_replace(' unsigned', '', $string);
         }
@@ -477,25 +491,31 @@ class My {
     
             $this->currentTable = $table;
             if(isset($this->options['data_wipe'])) {
-                echo Timer::diff() . $this->col->getColoredString('TRUNCATE TABLE '.$table . "\n", "red");
-                $this->pg->db()->query('TRUNCATE TABLE '.$table);
+                if(is_array($this->selectedData[$this->currentTable])) {
+                    if(isset($this->selectedData[$this->currentTable]['table'])) { $newTable = $this->selectedData[$this->currentTable]['table']; } else { $newTable = $this->currentTable; }
+                    echo Timer::diff() . $this->col->getColoredString('TRUNCATE TABLE '.$newTable . "\n", "red");
+                    $this->pg->db()->query('TRUNCATE TABLE '.$newTable);
+                } else {
+                    echo Timer::diff() . $this->col->getColoredString('TRUNCATE TABLE '.$this->currentTable . "\n", "red");
+                    $this->pg->db()->query('TRUNCATE TABLE '.$this->currentTable);
+                }
             }
 
-            $result = $this->db->query("SELECT COUNT(1) as countFields FROM `$table`");
+            $result = $this->db->query("SELECT COUNT(1) as countFields FROM `{$this->currentTable}`");
             if($result!==false) {
                 $this->totalRows = $result[0]['countFields'];
                 $this->pages = ceil( $this->totalRows / $this->rowsPerTime );
                 if(isset($this->options['soft'])) {
-                    $result = $this->pg->db()->query("SELECT COUNT(1) as countFields FROM $table");
+                    $result = $this->pg->db()->query("SELECT COUNT(1) as countFields FROM {$this->currentTable}");
                     if($this->totalRows == 0) {
-                        echo Timer::diff() . $this->col->getColoredString("$table", "yellow") . $this->col->getColoredString("\t source table is empty\n", "purple");
+                        echo Timer::diff() . $this->col->getColoredString("{$this->currentTable}", "yellow") . $this->col->getColoredString("\t source table is empty\n", "purple");
                         continue;
                     } elseif ($this->totalRows == $result[0]['countfields']) {
-                        echo Timer::diff() . $this->col->getColoredString("$table", "yellow") . $this->col->getColoredString("\t data already inserted, skip by 'soft' param\n", "brown");
+                        echo Timer::diff() . $this->col->getColoredString("{$this->currentTable}", "yellow") . $this->col->getColoredString("\t data already inserted, skip by 'soft' param\n", "brown");
                         continue;
                     } elseif ($result[0]['countfields']>0){
 //                        var_dump($result);
-                        echo Timer::diff() . $this->col->getColoredString("$table", "yellow") . $this->col->getColoredString("\t table not empty, skipping\n", "cyan");
+                        echo Timer::diff() . $this->col->getColoredString("{$this->currentTable}", "yellow") . $this->col->getColoredString("\t table not empty, skipping\n", "cyan");
                         continue;
                     }
                 }
@@ -511,7 +531,7 @@ $yellow = $sth->fetchAll();
                  */
                 $this->db->prepare("SELECT * FROM `{$this->currentTable}` LIMIT ?, ?");
                 
-                echo Timer::diff() . $this->col->getColoredString("$table\n", "yellow");
+                echo Timer::diff() . $this->col->getColoredString("{$this->currentTable}\n\n", "yellow");
                 $this->dataTransfer();
             } elseif ($result===false)
                 echo Timer::diff() . $this->col->getColoredString("Skip table, records counter return false.". "\n", "light_blue");
@@ -521,7 +541,7 @@ $yellow = $sth->fetchAll();
     protected function dataTransfer() {
         while(  $this->page<=$this->pages &&
                 ( $this->dataSkip > $this->page * $this->rowsPerTime || $this->dataSkip == 0)) {
-            Timer::reset();
+            
             
             $percentage = round( $this->page / $this->pages * 100, 2 );
             $start = $this->rowsPerTime * ($this->page - 1);
@@ -531,8 +551,7 @@ $yellow = $sth->fetchAll();
 
             $var = $this->db->execute();
             if($var == true) {
-                $reedTime = Timer::interval();
-                $this->totalReadTime += $reedTime;
+                
                 $colCount = $this->db->stmt->columnCount();
                 
                 if($this->pgPrepared == 0) {
@@ -541,44 +560,68 @@ $yellow = $sth->fetchAll();
 
                 while($row = $this->db->stmt->fetch()) {
                     Timer::reset();
-
                     $this->currentData = array();
+                    $param = 1;
                     for($i = 0; $i<=$colCount-1; $i++) {
-                        $val = $this->fixValues($row[$i], $i);
-                        
-                        $this->currentData[$i] = $row[$i];
-                        $this->currentFixedData[$i] = $val;
-                        
-                        if(ctype_digit($val)) {
-                            $this->pg->db()->bindValue(($i+1), $val, PDO::PARAM_INT);    
-                        } elseif($val === null ) {
-                            $this->pg->db()->bindValue(($i+1), $val, PDO::PARAM_NULL); 
-                        } else {
-                            $this->pg->db()->bindValue(($i+1), iconv(mb_detect_encoding($val), 'UTF-8', $val));
-                        }
-                    }
+                        if(is_array($this->selectedData[$this->currentTable])) {
+                            if(isset($this->selectedData[$this->currentTable]['values'][$i])) {
+                                $newI = $this->selectedData[$this->currentTable]['values'][$i];
+//                                print_r($this->selectedData[$this->currentTable]['values']);
+                                $val = $this->fixValues($row[$newI], $newI);
+                                $this->currentData[$newI] = $row[$newI];
+                                $this->currentFixedData[$newI] = $val;
 
+                                if(ctype_digit($val)) {
+                                    $this->pg->db()->bindValue(($newI), $val, PDO::PARAM_INT);    
+                                } elseif($val === null ) {
+                                    $this->pg->db()->bindValue(($newI), $val, PDO::PARAM_NULL); 
+                                } else {
+                                    $this->pg->db()->bindValue(($newI), iconv(mb_detect_encoding($val), 'UTF-8', $val));
+                                }
+                                $param++;
+                            }
+                            else continue;
+                        } else {
+                            $newI = $i;
+                            $val = $this->fixValues($row[$newI], $newI);
+                            $this->currentData[$newI] = $row[$newI];
+                            $this->currentFixedData[$newI] = $val;
+
+                            if(ctype_digit($val)) {
+                                $this->pg->db()->bindValue(($newI+1), $val, PDO::PARAM_INT);    
+                            } elseif($val === null ) {
+                                $this->pg->db()->bindValue(($newI+1), $val, PDO::PARAM_NULL); 
+                            } else {
+                                $this->pg->db()->bindValue(($newI+1), iconv(mb_detect_encoding($val), 'UTF-8', $val));
+                            }
+                        }
+                            
+                    }
+                    $reedTime = Timer::interval();
+                    $this->totalReadTime += $reedTime;
+                    Timer::reset();
                     $res = $this->pg->db()->execute();
                     $writeTime = Timer::interval();
                     $this->totalWriteTime += $writeTime;
                     
                     if($res == false ) {
                         echo Timer::diff() . "\t ERROR IN POSTGRESQL rows($colCount)\n";
-                        print_r($this->currentData);var_dump($this->currentData);
-                        print_r($this->currentFixedData);var_dump($row);
+//                        print_r($this->currentData);
+                        var_dump($this->currentData);
+//                        print_r($this->currentFixedData);
+//                        var_dump($row);
                         echo Timer::diff() . $this->col->getColoredString(print_r($this->pg->db()->getError(), 1). "\n", "red");
                         exit;
                     }
                 }
-                
                 echo $this->col->getColoredString( "\033[1F" . Timer::diff(), "light_green" ) . 
                      $this->col->getColoredString( "Records: ", "cyan") . 
-                     $this->col->getColoredString( ($this->page * $this->rowsPerTime ) . "/", "magenta") .
+                     $this->col->getColoredString( $this->page * $this->rowsPerTime . "/", "magenta") .
                      $this->col->getColoredString( $this->totalRows . " ", "green" ) . 
                      $this->col->getColoredString( $percentage . "% ", "yellow" ) .
                      $this->col->getColoredString( $this->rowsPerTime . "pt ", "green" ) .
-                     $this->col->getColoredString( $reedTime . "\t", "magenta" ) . 
-                     $this->col->getColoredString( $writeTime, "purple" ); 
+                     $this->col->getColoredString( $reedTime . " ", "magenta" ) . 
+                     $this->col->getColoredString( $writeTime."                          \n", "purple" ); 
                      
             } else {
                 echo Timer::diff() . "\t ERROR IN MYSQL\n";
@@ -597,18 +640,22 @@ $yellow = $sth->fetchAll();
             echo Timer::diff() . $this->col->getColoredString("Skipped by 'data_skip'\t", "light_purple");
         }
         
-        echo $this->col->getColoredString( "R:".$this->totalReadTime . "\t", "magenta" ) . 
-             $this->col->getColoredString( "W:".$this->totalWriteTime . "\n", "purple" );
+        echo $this->col->getColoredString( "R:".round($this->totalReadTime, 0) . " ", "magenta" ) . 
+             $this->col->getColoredString( "W:".round($this->totalWriteTime, 0) . " \n", "purple" );
     }
     
     protected function pgPrepare($cols) {
         $sql = "INSERT INTO {$this->currentTable} VALUES (";
-        for($i = 0; $i<=$cols-1; $i++) {
-            $sql .= '?';
-            if($i<$cols-1)
-                $sql .= ', ';
+//        print_r($this->selectedData[$this->currentTable]); exit;
+        if(is_array($this->selectedData[$this->currentTable])) {
+            $sql .= $this->selectedData[$this->currentTable]['insert'];
+        } else {
+            for($i = 0; $i<=$cols-1; $i++) {
+                $sql .= '?';
+                if($i<$cols-1)
+                    $sql .= ', ';
+            }
         }
-        
         $sql .= ");";
         //"INSERT INTO {$this->currentTable} VALUES (?, ?);"
         $this->pg->db()->prepare($sql);
@@ -617,8 +664,12 @@ $yellow = $sth->fetchAll();
     
     protected function fixValues($val, $i) {
         if(isset($this->tableFixValue[$this->currentTable][$i]) ) {
+            $change = 0;
             try {
-                exec($this->tableFixValue[$this->currentTable][$i]);
+                eval($this->tableFixValue[$this->currentTable][$i]);
+                if($change == 1) {
+                    return $result;
+                }
             } catch (Exception $e) {
                 // TODO exec issue
             }

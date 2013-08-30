@@ -44,7 +44,7 @@ class Timer {
         $diff = $end-$start;
         $sec = intval($diff);
         $micro = $diff - $sec;
-        $final = strftime('%S', mktime(0, 0, $sec)) . str_replace('0.', '.', sprintf('%.3f', $micro));
+        $final = strftime('%S', mktime(0, 0, $sec)) . str_replace('0.', '.', sprintf('%.5f', $micro));
 
         return $final;
     }
