@@ -22,6 +22,7 @@ class My {
     protected $currentTable;
     protected $currentField;
     protected $currentNewField;
+    protected $currentIncrement = array();
     protected $currentType;
     protected $currentNewType;
     protected $currentData;
@@ -105,6 +106,7 @@ class My {
             $this->loadSelectedData();
             $this->loadTableFixValue();
             $this->transferPrepare();
+            $this->createSequences();
         } 
         
         if (isset($this->options['index_only']) or isset($this->options['full_dump'])) {
@@ -147,6 +149,19 @@ class My {
     
     protected function createIndexes() {
         foreach ($this->indexSql as $sql) {
+            Timer::reset();
+            $result = $this->pg->db()->exec($sql);
+            if($result !== false) {
+                echo Timer::diff() . Timer::interval() . $this->col->getColoredString("Sql executed\n", "brown");
+            } else {
+                echo Timer::diff() . Timer::interval() . $this->col->getColoredString("Sql failed", "red");
+                print_r($this->pg->db()->getError());
+            }
+        }
+    }
+    
+    protected function createSequences() {
+        foreach ($this->seqSql as $sql) {
             Timer::reset();
             $result = $this->pg->db()->exec($sql);
             if($result !== false) {
@@ -280,6 +295,8 @@ class My {
             return $this->createSmallIntType();
         } elseif(strpos($string, 'mediumint') !== false) {
             return $this->createIntegerType();
+        } elseif(strpos($string, 'bigint') !== false) {
+            return $this->createBigIntType();
         } elseif(strpos($string, 'int') !== false && strpos($string, 'smallint') === false) {
             return $this->createIntegerType();
         } elseif((strpos($string, 'longtext') !== false) OR 
@@ -302,6 +319,7 @@ class My {
     protected function getPgAutoIncrement($inc) {
         if($inc == 'auto_increment') {
             $this->currentNewType = 'serial';
+            $this->currentIncrement[$this->currentTable] = $this->currentField;
         }
         
         //TODO on update CURRENT_TIMESTAMP
@@ -312,9 +330,9 @@ class My {
             // TODO могут быть составными
             $this->indexSql[] = 'ALTER TABLE "'.$this->currentTable.'" ADD CONSTRAINT "'.$this->currentTable.'_pkey" PRIMARY KEY ("'.$this->currentField.'");';
         } elseif ($key == "UNI") {
-            $this->indexSql[] = "CREATE UNIQUE INDEX {$this->currentField}_idx ON {$this->currentTable} ({$this->currentField});";
+            $this->indexSql[] = "CREATE UNIQUE INDEX {$this->currentTable}_{$this->currentField}_uniq_idx ON {$this->currentTable} ({$this->currentField});";
         } elseif ($key == "MUL") {
-            $this->indexSql[] = "CREATE INDEX {$this->currentField}_idx ON {$this->currentTable} ({$this->currentField});";
+            $this->indexSql[] = "CREATE INDEX {$this->currentTable}_{$this->currentField}_idx ON {$this->currentTable} ({$this->currentField});";
         }
         
         return $key;
@@ -365,6 +383,10 @@ class My {
     
     protected function createSmallIntType() {
         return 'smallint';
+    }
+    
+    protected function createBigIntType() {
+        return 'bigint';
     }
     
     protected function createDecimalType($string) {
@@ -519,22 +541,22 @@ class My {
                         continue;
                     }
                 }
-                /*
-                 * $sql = 'SELECT name, colour, calories
-    FROM fruit
-    WHERE calories < :calories AND colour = :colour';
-$sth = $dbh->prepare($sql, array(PDO::ATTR_CURSOR => PDO::CURSOR_FWDONLY));
-$sth->execute(array(':calories' => 150, ':colour' => 'red'));
-$red = $sth->fetchAll();
-$sth->execute(array(':calories' => 175, ':colour' => 'yellow'));
-$yellow = $sth->fetchAll();
-                 */
+                
+                $this->prepareSeq();
+                
                 $this->db->prepare("SELECT * FROM `{$this->currentTable}` LIMIT ?, ?");
                 
                 echo Timer::diff() . $this->col->getColoredString("{$this->currentTable}\n\n", "yellow");
-                $this->dataTransfer();
+//                $this->dataTransfer();
             } elseif ($result===false)
                 echo Timer::diff() . $this->col->getColoredString("Skip table, records counter return false.". "\n", "light_blue");
+        }
+    }
+    
+    protected function prepareSeq() {
+        if(isset($this->currentIncrement[$this->currentTable])) {
+            $result = $this->db->query("SHOW TABLE STATUS LIKE '{$this->currentTable}'");
+            $this->seqSql[] = "ALTER SEQUENCE {$this->currentTable}_{$this->currentIncrement[$this->currentTable]}_seq RESTART WITH {$result[0]['Auto_increment']}";
         }
     }
     
